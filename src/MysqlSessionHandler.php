@@ -3,7 +3,7 @@ declare(strict_types = 1);
 
 namespace Spaze\Session;
 
-use Nette\Database\Context;
+use Nette\Database\Explorer;
 use Nette\Database\Table\ActiveRow;
 use Nette\SmartObject;
 use SessionHandlerInterface;
@@ -19,7 +19,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	use SmartObject;
 
 
-	private Context $context;
+	private Explorer $explorer;
 
 	private ?StaticKeyEncryption $encryptionService = null;
 
@@ -51,9 +51,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	public $onBeforeDataWrite;
 
 
-	public function __construct(Context $context)
+	public function __construct(Explorer $explorer)
 	{
-		$this->context = $context;
+		$this->explorer = $explorer;
 	}
 
 
@@ -106,7 +106,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			$sessionId = \session_id();
 			if ($sessionId) {
 				$this->lockId = $this->hash($sessionId, false);
-				$this->context->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
+				$this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
 			}
 		}
 	}
@@ -118,7 +118,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			return;
 		}
 
-		$this->context->query('SELECT RELEASE_LOCK(?)', $this->lockId);
+		$this->explorer->query('SELECT RELEASE_LOCK(?)', $this->lockId);
 		$this->lockId = null;
 	}
 
@@ -149,7 +149,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	public function destroy($sessionId): bool
 	{
 		$hashedSessionId = $this->hash($sessionId);
-		$this->context->table($this->tableName)->where('id', $hashedSessionId)->delete();
+		$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
 		$this->unlock();
 		return true;
 	}
@@ -163,7 +163,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	{
 		$this->lock();
 		$hashedSessionId = $this->hash($sessionId);
-		$this->row = $this->context->table($this->tableName)->get($hashedSessionId);
+		$this->row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 
 		if ($this->row) {
 			$this->data[$sessionId] = ($this->encryptionService ? $this->encryptionService->decrypt($this->row->data) : $this->row->data);
@@ -189,14 +189,14 @@ class MysqlSessionHandler implements SessionHandlerInterface
 				$sessionData = $this->encryptionService->encrypt($sessionData);
 			}
 			$this->onBeforeDataWrite();
-			$row = $this->context->table($this->tableName)->get($hashedSessionId);
+			$row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 			if ($row) {
 				$row->update([
 					'timestamp' => $time,
 					'data' => $sessionData,
 				] + $this->additionalData);
 			} else {
-				$this->context->table($this->tableName)->insert([
+				$this->explorer->table($this->tableName)->insert([
 					'id' => $hashedSessionId,
 					'timestamp' => $time,
 					'data' => $sessionData,
@@ -230,12 +230,12 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		// In a typical master-master replication setup, the server IDs are 1 and 2.
 		// There is no subtraction on server 1 and one day (or one tenth of $maxLifeTime)
 		// subtraction on server 2.
-		$row = $this->context->query('SELECT @@server_id as `serverId`')->fetch();
+		$row = $this->explorer->query('SELECT @@server_id as `serverId`')->fetch();
 		if ($row && $row->serverId > 1 && $row->serverId < 10) {
 			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $maxLifeTime / 10);
 		}
 
-		$this->context->table($this->tableName)
+		$this->explorer->table($this->tableName)
 			->where('timestamp < ?', $maxTimestamp)
 			->delete();
 
