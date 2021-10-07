@@ -18,35 +18,30 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	use SmartObject;
 
-	/** @var string */
-	private $tableName;
 
-	/** @var integer */
-	private $lockTimeout = 5;
+	private string $tableName;
 
-	/** @var integer */
-	private $unchangedUpdateDelay = 300;
+	private int $lockTimeout = 5;
 
-	/** @var Context */
-	private $context;
+	private int $unchangedUpdateDelay = 300;
 
-	/** @var string */
-	private $lockId;
+	private Context $context;
+
+	private ?string $lockId;
 
 	/** @var string[] */
-	private $idHashes = [];
+	private array $idHashes = [];
 
-	/** @var ActiveRow */
-	private $row;
+	/** @var ActiveRow{data:string, timestamp:int}|null */
+	private ?ActiveRow $row;
 
 	/** @var string[] */
-	private $data = [];
+	private array $data = [];
 
 	/** @var mixed[] */
-	private $additionalData = [];
+	private array $additionalData = [];
 
-	/** @var StaticKeyEncryption */
-	private $encryptionService;
+	private ?StaticKeyEncryption $encryptionService;
 
 	/**
 	 * Occurs before the data is written to session.
@@ -108,8 +103,11 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	private function lock(): void
 	{
 		if ($this->lockId === null) {
-			$this->lockId = $this->hash(\session_id(), false);
-			$this->context->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
+			$sessionId = \session_id();
+			if ($sessionId) {
+				$this->lockId = $this->hash($sessionId, false);
+				$this->context->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
+			}
 		}
 	}
 
@@ -128,7 +126,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	/**
 	 * @param string $savePath
 	 * @param string $name
-	 * @return boolean
+	 * @return bool
 	 */
 	public function open($savePath, $name): bool
 	{
@@ -146,7 +144,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	/**
 	 * @param string $sessionId
-	 * @return boolean
+	 * @return bool
 	 */
 	public function destroy($sessionId): bool
 	{
@@ -178,7 +176,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	/**
 	 * @param string $sessionId
 	 * @param string $sessionData
-	 * @return boolean
+	 * @return bool
 	 */
 	public function write($sessionId, $sessionData): bool
 	{
@@ -191,7 +189,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 				$sessionData = $this->encryptionService->encrypt($sessionData);
 			}
 			$this->onBeforeDataWrite();
-			if ($row = $this->context->table($this->tableName)->get($hashedSessionId)) {
+			$row = $this->context->table($this->tableName)->get($hashedSessionId);
+			if ($row) {
 				$row->update([
 					'timestamp' => $time,
 					'data' => $sessionData,
@@ -203,7 +202,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 					'data' => $sessionData,
 				] + $this->additionalData);
 			}
-		} elseif ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) {
+		} elseif (($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) && $this->row) {
 			// Optimization: When data has not been changed, only update
 			// the timestamp after a configured delay, if any.
 			$this->row->update([
@@ -216,8 +215,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 
 	/**
-	 * @param integer $maxLifeTime
-	 * @return boolean
+	 * @param int $maxLifeTime
+	 * @return bool
 	 */
 	public function gc($maxLifeTime): bool
 	{
