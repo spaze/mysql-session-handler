@@ -9,7 +9,7 @@ use Nette\DI\Statement;
 class MysqlSessionHandlerExtension extends CompilerExtension
 {
 
-	private $defaults = [
+	private array $defaults = [
 		'tableName' => 'sessions',
 		'lockTimeout' => 5,
 		'unchangedUpdateDelay' => 300,
