@@ -18,35 +18,30 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	use SmartObject;
 
-	/** @var string */
-	private $tableName;
 
-	/** @var integer */
-	private $lockTimeout = 5;
+	private Context $context;
 
-	/** @var integer */
-	private $unchangedUpdateDelay = 300;
+	private ?StaticKeyEncryption $encryptionService = null;
 
-	/** @var Context */
-	private $context;
+	private string $tableName;
 
-	/** @var string */
-	private $lockId;
+	private int $lockTimeout = 5;
+
+	private int $unchangedUpdateDelay = 300;
+
+	private ?string $lockId = null;
 
 	/** @var string[] */
-	private $idHashes = [];
+	private array $idHashes = [];
 
-	/** @var ActiveRow */
-	private $row;
+	/** @var ActiveRow{data:string, timestamp:int}|null */
+	private ?ActiveRow $row;
 
 	/** @var string[] */
-	private $data = [];
+	private array $data = [];
 
 	/** @var mixed[] */
-	private $additionalData = [];
-
-	/** @var StaticKeyEncryption */
-	private $encryptionService;
+	private array $additionalData = [];
 
 	/**
 	 * Occurs before the data is written to session.
@@ -108,8 +103,11 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	private function lock(): void
 	{
 		if ($this->lockId === null) {
-			$this->lockId = $this->hash(\session_id(), false);
-			$this->context->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
+			$sessionId = \session_id();
+			if ($sessionId) {
+				$this->lockId = $this->hash($sessionId, false);
+				$this->context->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
+			}
 		}
 	}
 
@@ -128,7 +126,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	/**
 	 * @param string $savePath
 	 * @param string $name
-	 * @return boolean
+	 * @return bool
 	 */
 	public function open($savePath, $name): bool
 	{
@@ -146,7 +144,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	/**
 	 * @param string $sessionId
-	 * @return boolean
+	 * @return bool
 	 */
 	public function destroy($sessionId): bool
 	{
@@ -178,7 +176,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	/**
 	 * @param string $sessionId
 	 * @param string $sessionData
-	 * @return boolean
+	 * @return bool
 	 */
 	public function write($sessionId, $sessionData): bool
 	{
@@ -191,7 +189,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 				$sessionData = $this->encryptionService->encrypt($sessionData);
 			}
 			$this->onBeforeDataWrite();
-			if ($row = $this->context->table($this->tableName)->get($hashedSessionId)) {
+			$row = $this->context->table($this->tableName)->get($hashedSessionId);
+			if ($row) {
 				$row->update([
 					'timestamp' => $time,
 					'data' => $sessionData,
@@ -203,7 +202,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 					'data' => $sessionData,
 				] + $this->additionalData);
 			}
-		} elseif ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) {
+		} elseif ($this->row && ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay)) {
 			// Optimization: When data has not been changed, only update
 			// the timestamp after a configured delay, if any.
 			$this->row->update([
@@ -216,8 +215,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 
 	/**
-	 * @param integer $maxLifeTime
-	 * @return boolean
+	 * @param int $maxLifeTime
+	 * @return bool
 	 */
 	public function gc($maxLifeTime): bool
 	{
@@ -231,9 +230,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		// In a typical master-master replication setup, the server IDs are 1 and 2.
 		// There is no subtraction on server 1 and one day (or one tenth of $maxLifeTime)
 		// subtraction on server 2.
-		$serverId = $this->context->query('SELECT @@server_id as `server_id`')->fetch()->server_id;
-		if ($serverId > 1 && $serverId < 10) {
-			$maxTimestamp -= ($serverId - 1) * \max(86400, $maxLifeTime / 10);
+		$row = $this->context->query('SELECT @@server_id as `serverId`')->fetch();
+		if ($row && $row->serverId > 1 && $row->serverId < 10) {
+			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $maxLifeTime / 10);
 		}
 
 		$this->context->table($this->tableName)
