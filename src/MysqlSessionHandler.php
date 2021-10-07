@@ -202,7 +202,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 					'data' => $sessionData,
 				] + $this->additionalData);
 			}
-		} elseif (($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) && $this->row) {
+		} elseif ($this->row && ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay)) {
 			// Optimization: When data has not been changed, only update
 			// the timestamp after a configured delay, if any.
 			$this->row->update([
@@ -230,9 +230,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		// In a typical master-master replication setup, the server IDs are 1 and 2.
 		// There is no subtraction on server 1 and one day (or one tenth of $maxLifeTime)
 		// subtraction on server 2.
-		$serverId = $this->context->query('SELECT @@server_id as `server_id`')->fetch()->server_id;
-		if ($serverId > 1 && $serverId < 10) {
-			$maxTimestamp -= ($serverId - 1) * \max(86400, $maxLifeTime / 10);
+		$row = $this->context->query('SELECT @@server_id as `serverId`')->fetch();
+		if ($row && $row->serverId > 1 && $row->serverId < 10) {
+			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $maxLifeTime / 10);
 		}
 
 		$this->context->table($this->tableName)
