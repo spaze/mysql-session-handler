@@ -12,7 +12,7 @@ Custom PHP session handler for [Nette Framework](http://nette.org/) that uses My
 <details>
 <summary>Requirements for previous versions</summary>
 
-*Requirements for 2.1 (not supported anymore)**
+*Requirements for 2.1 (not supported anymore)*
 - [nette/database](https://github.com/nette/database) 2.4+
 - [nette/di](https://github.com/nette/utils) 2.4+
 - [nette/utils](https://github.com/nette/utils) 2.4+
