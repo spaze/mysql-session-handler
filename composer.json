@@ -43,5 +43,10 @@
 	},
 	"suggest": {
 		"spaze/encryption": "Adds a support for encrypted session storage"
+	},
+	"config": {
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true
+		}
 	}
 }
