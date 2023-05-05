@@ -42,7 +42,7 @@ class MysqlSessionHandlerExtension extends CompilerExtension
 			$definition->addSetup('setEncryptionService', [$this->config->encryptionService]);
 		}
 
-		/** @var ServiceDefinition */
+		/** @var ServiceDefinition $sessionDefinition */
 		$sessionDefinition = $builder->getDefinition('session');
 		$sessionSetup = $sessionDefinition->getSetup();
 		# Prepend setHandler method to other possible setups (setExpiration) which would start session prematurely
