@@ -119,7 +119,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	public function open(string $savePath, string $name): bool
+	public function open(string $path, string $name): bool
 	{
 		$this->lock();
 		return true;
@@ -133,51 +133,51 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	public function destroy(string $sessionId): bool
+	public function destroy(string $id): bool
 	{
-		$hashedSessionId = $this->hash($sessionId);
+		$hashedSessionId = $this->hash($id);
 		$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
 		$this->unlock();
 		return true;
 	}
 
 
-	public function read(string $sessionId): string
+	public function read(string $id): string
 	{
 		$this->lock();
-		$hashedSessionId = $this->hash($sessionId);
+		$hashedSessionId = $this->hash($id);
 		$this->row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 
 		if ($this->row) {
-			$this->data[$sessionId] = ($this->encryptionService ? $this->encryptionService->decrypt($this->row->data) : $this->row->data);
-			return $this->data[$sessionId];
+			$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($this->row->data) : $this->row->data);
+			return $this->data[$id];
 		}
 		return '';
 	}
 
 
-	public function write(string $sessionId, string $sessionData): bool
+	public function write(string $id, string $data): bool
 	{
 		$this->lock();
-		$hashedSessionId = $this->hash($sessionId);
+		$hashedSessionId = $this->hash($id);
 		$time = \time();
 
-		if (!isset($this->data[$sessionId]) || $this->data[$sessionId] !== $sessionData) {
+		if (!isset($this->data[$id]) || $this->data[$id] !== $data) {
 			if ($this->encryptionService) {
-				$sessionData = $this->encryptionService->encrypt($sessionData);
+				$data = $this->encryptionService->encrypt($data);
 			}
 			$this->onBeforeDataWrite();
 			$row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 			if ($row) {
 				$row->update([
 					'timestamp' => $time,
-					'data' => $sessionData,
+					'data' => $data,
 				] + $this->additionalData);
 			} else {
 				$this->explorer->table($this->tableName)->insert([
 					'id' => $hashedSessionId,
 					'timestamp' => $time,
-					'data' => $sessionData,
+					'data' => $data,
 				] + $this->additionalData);
 			}
 		} elseif ($this->row && ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay)) {
@@ -192,9 +192,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	public function gc(int $maxLifeTime): int|false
+	public function gc(int $max_lifetime): int|false
 	{
-		$maxTimestamp = \time() - $maxLifeTime;
+		$maxTimestamp = \time() - $max_lifetime;
 
 		// Try to avoid a conflict when running garbage collection simultaneously on two
 		// MySQL servers at a very busy site in a master-master replication setup by
@@ -206,7 +206,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		// subtraction on server 2.
 		$row = $this->explorer->query('SELECT @@server_id as `serverId`')->fetch();
 		if ($row && $row->serverId > 1 && $row->serverId < 10) {
-			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $maxLifeTime / 10);
+			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $max_lifetime / 10);
 		}
 
 		return $this->explorer->table($this->tableName)
