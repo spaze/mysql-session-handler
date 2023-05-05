@@ -12,6 +12,8 @@ use Spaze\Encryption\Symmetric\StaticKey as StaticKeyEncryption;
 /**
  * Storing session to database.
  * Inspired by: https://github.com/JedenWeb/SessionStorage/
+ *
+ * @method onBeforeDataWrite()
  */
 class MysqlSessionHandler implements SessionHandlerInterface
 {
