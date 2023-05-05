@@ -46,7 +46,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	 *
 	 * @var callable[] function ()
 	 */
-	public $onBeforeDataWrite;
+	public array $onBeforeDataWrite;
 
 
 	public function __construct(
@@ -79,11 +79,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	/**
-	 * @param string $key
-	 * @param mixed $value
-	 */
-	public function setAdditionalData(string $key, $value): void
+	public function setAdditionalData(string $key, mixed $value): void
 	{
 		$this->additionalData[$key] = $value;
 	}
@@ -121,12 +117,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	/**
-	 * @param string $savePath
-	 * @param string $name
-	 * @return bool
-	 */
-	public function open($savePath, $name): bool
+	public function open(string $savePath, string $name): bool
 	{
 		$this->lock();
 		return true;
@@ -140,11 +131,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	/**
-	 * @param string $sessionId
-	 * @return bool
-	 */
-	public function destroy($sessionId): bool
+	public function destroy(string $sessionId): bool
 	{
 		$hashedSessionId = $this->hash($sessionId);
 		$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
@@ -153,11 +140,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	/**
-	 * @param string $sessionId
-	 * @return string
-	 */
-	public function read($sessionId): string
+	public function read(string $sessionId): string
 	{
 		$this->lock();
 		$hashedSessionId = $this->hash($sessionId);
@@ -171,12 +154,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
-	/**
-	 * @param string $sessionId
-	 * @param string $sessionData
-	 * @return bool
-	 */
-	public function write($sessionId, $sessionData): bool
+	public function write(string $sessionId, string $sessionData): bool
 	{
 		$this->lock();
 		$hashedSessionId = $this->hash($sessionId);
