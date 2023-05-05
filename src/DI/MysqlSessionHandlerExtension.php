@@ -33,7 +33,7 @@ class MysqlSessionHandlerExtension extends CompilerExtension
 		$builder = $this->getContainerBuilder();
 
 		$definition = $builder->addDefinition($this->prefix('sessionHandler'))
-			->setClass('Spaze\Session\MysqlSessionHandler')
+			->setType('Spaze\Session\MysqlSessionHandler')
 			->addSetup('setTableName', [$this->config->tableName])
 			->addSetup('setLockTimeout', [$this->config->lockTimeout])
 			->addSetup('setUnchangedUpdateDelay', [$this->config->unchangedUpdateDelay]);
