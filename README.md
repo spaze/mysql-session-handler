@@ -58,11 +58,13 @@ Migration from unecrypted to encrypted session storage is not (yet?) supported.
 ### `onBeforeDataWrite`
 The event occurs before session data is written to the session table, both for a new session (when a new row is inserted) or an existing session (a row is updated), even if there's no change in the session data.
 
-You can add a new column by calling `setAdditionalData()` in the event handler:
+## Additional columns
+
+You can add a new column to the session table by calling `setAdditionalData()` in the event handler:
 ```
 setAdditionalData(string $key, $value): void
 ```
-Use it to store for example user id to which the session belongs to.
+Use it to store for example user id to which the session belongs to. See for example [this code](https://github.com/spaze/michalspacek.cz/blob/fbd438e8f4c1da658a88bc8c3bf5af59fcd063e6/app/src/Application/WebApplication.php#L42-L50) that uses the `Nette\Security\User::onLoggedIn` handler to do that.
 
 ## Credits
 
