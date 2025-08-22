@@ -5,21 +5,15 @@ namespace Spaze\Session;
 
 use Nette\Database\Explorer;
 use Nette\Database\Table\ActiveRow;
-use Nette\SmartObject;
 use SessionHandlerInterface;
 use Spaze\Encryption\SymmetricKeyEncryption;
 
 /**
  * Storing session to database.
  * Inspired by: https://github.com/JedenWeb/SessionStorage/
- *
- * @method onBeforeDataWrite()
  */
 class MysqlSessionHandler implements SessionHandlerInterface
 {
-
-	use SmartObject;
-
 
 	private ?SymmetricKeyEncryption $encryptionService = null;
 
@@ -47,7 +41,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	 *
 	 * @var callable[] function ()
 	 */
-	public array $onBeforeDataWrite;
+	public array $onBeforeDataWrite = [];
 
 
 	public function __construct(
@@ -160,7 +154,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		$this->lock();
 		$hashedSessionId = $this->hash($id);
 		$time = \time();
-		$this->onBeforeDataWrite();
+		foreach ($this->onBeforeDataWrite as $handler) {
+			$handler();
+		}
 		if (!isset($this->data[$id]) || $this->data[$id] !== $data || $this->additionalData !== []) {
 			if ($this->encryptionService) {
 				$data = $this->encryptionService->encrypt($data);
