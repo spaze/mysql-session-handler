@@ -15,7 +15,7 @@
 	],
 	"require": {
 		"php": "^8.2",
-		"nette/database": "^3.2",
+		"nette/database": "^3.2.4",
 		"nette/di": "^3.2"
 	},
 	"require-dev": {
