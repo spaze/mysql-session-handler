@@ -26,21 +26,21 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	private ?string $lockId = null;
 
-	/** @var string[] */
+	/** @var array<string, string> session id => session id hash */
 	private array $idHashes = [];
 
 	private ?ActiveRow $row;
 
-	/** @var string[] */
+	/** @var array<string, string> session id => session data */
 	private array $data = [];
 
-	/** @var mixed[] */
+	/** @var array<string, mixed> column name => column data */
 	private array $additionalData = [];
 
 	/**
 	 * Occurs before the data is written to session.
 	 *
-	 * @var callable[] function ()
+	 * @var list<callable(): void>
 	 */
 	public array $onBeforeDataWrite = [];
 
