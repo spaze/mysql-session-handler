@@ -7,6 +7,7 @@ use Nette\Database\Explorer;
 use Nette\Database\Table\ActiveRow;
 use SessionHandlerInterface;
 use Spaze\Encryption\SymmetricKeyEncryption;
+use Spaze\Session\Exceptions\SessionColumnUnexpectedTypeException;
 
 /**
  * Storing session to database.
@@ -25,21 +26,21 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	private ?string $lockId = null;
 
-	/** @var string[] */
+	/** @var array<string, string> session id => session id hash */
 	private array $idHashes = [];
 
 	private ?ActiveRow $row;
 
-	/** @var string[] */
+	/** @var array<string, string> session id => session data */
 	private array $data = [];
 
-	/** @var mixed[] */
+	/** @var array<string, mixed> column name => column data */
 	private array $additionalData = [];
 
 	/**
 	 * Occurs before the data is written to session.
 	 *
-	 * @var callable[] function ()
+	 * @var list<callable(): void>
 	 */
 	public array $onBeforeDataWrite = [];
 
@@ -142,6 +143,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		$this->row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 
 		if ($this->row) {
+			if (!is_string($this->row->data)) {
+				throw new SessionColumnUnexpectedTypeException('data', gettype($this->row->data), 'string');
+			}
 			$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($this->row->data) : $this->row->data);
 			return $this->data[$id];
 		}
@@ -174,12 +178,17 @@ class MysqlSessionHandler implements SessionHandlerInterface
 					'data' => $data,
 				] + $this->additionalData);
 			}
-		} elseif ($this->row && ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay)) {
-			// Optimization: When data has not been changed, only update
-			// the timestamp after a configured delay, if any.
-			$this->row->update([
-				'timestamp' => $time,
-			]);
+		} elseif ($this->row) {
+			if (!is_int($this->row->timestamp)) {
+				throw new SessionColumnUnexpectedTypeException('timestamp', gettype($this->row->timestamp), 'int');
+			}
+			if ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) {
+				// Optimization: When data has not been changed, only update
+				// the timestamp after a configured delay, if any.
+				$this->row->update([
+					'timestamp' => $time,
+				]);
+			}
 		}
 
 		return true;
@@ -199,7 +208,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		// There is no subtraction on server 1 and one day (or one tenth of $maxLifeTime)
 		// subtraction on server 2.
 		$row = $this->explorer->query('SELECT @@server_id as `serverId`')->fetch();
-		if ($row && $row->serverId > 1 && $row->serverId < 10) {
+		if ($row && is_int($row->serverId) && $row->serverId > 1 && $row->serverId < 10) {
 			$maxTimestamp -= ($row->serverId - 1) * \max(86400, $max_lifetime / 10);
 		}
 
