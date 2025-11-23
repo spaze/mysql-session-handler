@@ -20,7 +20,11 @@ $ composer require spaze/mysql-session-handler
 
 After installation:
 
-1) Create the table sessions using SQL in [sql/create.sql](sql/create.sql).
+1) Create a table named `sessions` using SQL in [sql/create.sql](sql/create.sql). The name of the table can be changed in the configuration using the `tableName` key, like this:
+```neon
+sessionHandler:
+    tableName: sessions_table
+```
 
 2) Register an extension in config.neon:
 
