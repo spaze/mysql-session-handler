@@ -120,7 +120,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	private function getRow(string $id): ?ActiveRow
 	{
 		if (!\array_key_exists($id, $this->rows)) {
-			$this->rows[$id] = $this->explorer->table($this->tableName)->get($this->hash($id));
+			// The columns are listed explicitly, otherwise Nette may fetch just some of them and refetch the row on access, when it may be gone
+			$this->rows[$id] = $this->explorer->table($this->tableName)->select('id, timestamp, data')->get($this->hash($id));
 		}
 		return $this->rows[$id];
 	}
