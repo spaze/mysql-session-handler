@@ -29,7 +29,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	/** @var array<string, string> session id => session id hash */
 	private array $idHashes = [];
 
-	private ?ActiveRow $row;
+	/** @var array<string, ?ActiveRow> session id => session ActiveRow or null if the row does not exist */
+	private array $rows = [];
 
 	/** @var array<string, string> session id => session data */
 	private array $data = [];
@@ -92,12 +93,15 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	private function lock(): void
 	{
-		if ($this->lockId === null) {
-			$sessionId = \session_id();
-			if ($sessionId) {
-				$this->lockId = $this->hash($sessionId, false);
-				$this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
-			}
+		$sessionId = \session_id();
+		if (!$sessionId) {
+			return;
+		}
+		$lockId = $this->hash($sessionId, false);
+		if ($this->lockId !== $lockId) {
+			$this->unlock();
+			$this->lockId = $lockId;
+			$this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
 		}
 	}
 
@@ -113,8 +117,29 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
+	private function getRow(string $id): ?ActiveRow
+	{
+		if (!\array_key_exists($id, $this->rows)) {
+			// The columns are listed explicitly, otherwise Nette may fetch just some of them and refetch the row on access, when it may be gone
+			$this->rows[$id] = $this->explorer->table($this->tableName)->select('id, timestamp, data')->get($this->hash($id));
+		}
+		return $this->rows[$id];
+	}
+
+
+	/**
+	 * Rows fetched in a previous open/close cycle may have been changed or deleted by other requests after the lock was released.
+	 */
+	private function clearCache(): void
+	{
+		$this->rows = [];
+		$this->data = [];
+	}
+
+
 	public function open(string $path, string $name): bool
 	{
+		$this->clearCache();
 		$this->lock();
 		return true;
 	}
@@ -123,6 +148,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	public function close(): bool
 	{
 		$this->unlock();
+		$this->clearCache();
 		return true;
 	}
 
@@ -131,6 +157,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	{
 		$hashedSessionId = $this->hash($id);
 		$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
+		unset($this->rows[$id], $this->data[$id]);
 		$this->unlock();
 		return true;
 	}
@@ -139,14 +166,13 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	public function read(string $id): string
 	{
 		$this->lock();
-		$hashedSessionId = $this->hash($id);
-		$this->row = $this->explorer->table($this->tableName)->get($hashedSessionId);
+		$row = $this->getRow($id);
 
-		if ($this->row) {
-			if (!is_string($this->row->data)) {
-				throw new SessionColumnUnexpectedTypeException('data', gettype($this->row->data), 'string');
+		if ($row) {
+			if (!is_string($row->data)) {
+				throw new SessionColumnUnexpectedTypeException('data', gettype($row->data), 'string');
 			}
-			$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($this->row->data) : $this->row->data);
+			$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($row->data) : $row->data);
 			return $this->data[$id];
 		}
 		return '';
@@ -161,11 +187,11 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		foreach ($this->onBeforeDataWrite as $handler) {
 			$handler();
 		}
+		$row = $this->getRow($id);
 		if (!isset($this->data[$id]) || $this->data[$id] !== $data || $this->additionalData !== []) {
 			if ($this->encryptionService) {
 				$data = $this->encryptionService->encrypt($data);
 			}
-			$row = $this->explorer->table($this->tableName)->get($hashedSessionId);
 			if ($row) {
 				$row->update([
 					'timestamp' => $time,
@@ -177,15 +203,16 @@ class MysqlSessionHandler implements SessionHandlerInterface
 					'timestamp' => $time,
 					'data' => $data,
 				] + $this->additionalData);
+				unset($this->rows[$id]);
 			}
-		} elseif ($this->row) {
-			if (!is_int($this->row->timestamp)) {
-				throw new SessionColumnUnexpectedTypeException('timestamp', gettype($this->row->timestamp), 'int');
+		} elseif ($row) {
+			if (!is_int($row->timestamp)) {
+				throw new SessionColumnUnexpectedTypeException('timestamp', gettype($row->timestamp), 'int');
 			}
-			if ($this->unchangedUpdateDelay === 0 || $time - $this->row->timestamp > $this->unchangedUpdateDelay) {
+			if ($this->unchangedUpdateDelay === 0 || $time - $row->timestamp > $this->unchangedUpdateDelay) {
 				// Optimization: When data has not been changed, only update
 				// the timestamp after a configured delay, if any.
-				$this->row->update([
+				$row->update([
 					'timestamp' => $time,
 				]);
 			}
@@ -215,6 +242,22 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		return $this->explorer->table($this->tableName)
 			->where('timestamp < ?', $maxTimestamp)
 			->delete();
+	}
+
+
+	// phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps -- the name is dictated by PHP
+	public function create_sid(): string
+	{
+		do {
+			$id = \bin2hex(\random_bytes(16));
+		} while ($this->validateId($id));
+		return $id;
+	}
+
+
+	public function validateId(string $id): bool
+	{
+		return $this->getRow($id) !== null;
 	}
 
 }
