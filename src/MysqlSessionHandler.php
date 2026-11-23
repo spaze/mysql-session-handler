@@ -8,6 +8,7 @@ use Nette\Database\Table\ActiveRow;
 use SessionHandlerInterface;
 use Spaze\Encryption\SymmetricKeyEncryption;
 use Spaze\Session\Exceptions\SessionColumnUnexpectedTypeException;
+use Spaze\Session\Exceptions\SessionLockException;
 
 /**
  * Storing session to database.
@@ -100,8 +101,12 @@ class MysqlSessionHandler implements SessionHandlerInterface
 		$lockId = $this->hash($sessionId, false);
 		if ($this->lockId !== $lockId) {
 			$this->unlock();
+			// 1 if the lock was acquired, 0 if it timed out, null on some errors, most errors throw an exception
+			$result = $this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $lockId, $this->lockTimeout)->fetchField();
+			if ($result !== 1) {
+				throw new SessionLockException($this->lockTimeout, $result === 0);
+			}
 			$this->lockId = $lockId;
-			$this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $this->lockId, $this->lockTimeout);
 		}
 	}
 

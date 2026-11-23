@@ -70,6 +70,15 @@ setAdditionalData(string $key, $value): void
 ```
 Use it to store, for example, the user id the session belongs to. See for example [this code](https://github.com/spaze/michalspacek.cz/blob/fbd438e8f4c1da658a88bc8c3bf5af59fcd063e6/app/src/Application/WebApplication.php#L42-L50) which uses the `Nette\Security\User::onLoggedIn` handler to do that.
 
+## Locking
+
+Requests using the same session wait for each other, the session is locked with a MySQL named lock from when it's started until it's closed. If the lock is not acquired within the timeout, 5 seconds by default, `Spaze\Session\Exceptions\SessionLockException` is thrown, so that the request doesn't overwrite changes made by the request holding the lock. Close the session early in long-running requests, with `session_write_close()` or `Nette\Http\Session::close()`, or change the timeout:
+```neon
+sessionHandler:
+    lockTimeout: 10
+```
+A timeout of 0 doesn't wait at all, a negative timeout waits indefinitely, like PHP's own `files` session handler.
+
 ## Credits
 
 This is heavily based on [MySQL Session handler](https://github.com/pematon/mysql-session-handler) by [Pematon](https://github.com/orgs/pematon/people) ([Marián Černý](https://github.com/mariancerny) & [Peter Knut](https://github.com/peterpp)), thanks!
