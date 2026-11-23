@@ -198,18 +198,22 @@ class MysqlSessionHandler implements SessionHandlerInterface
 				$data = $this->encryptionService->encrypt($data);
 			}
 			if ($row) {
-				$row->update([
+				// Not $row->update() because it re-reads the row afterwards and throws if it is gone by then
+				$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
 					'timestamp' => $time,
 					'data' => $data,
 				] + $this->additionalData);
 			} else {
+				// A list with one row, because inserting a single row re-reads it afterwards and throws if it is gone by then
 				$this->explorer->table($this->tableName)->insert([
-					'id' => $hashedSessionId,
-					'timestamp' => $time,
-					'data' => $data,
-				] + $this->additionalData);
-				unset($this->rows[$id]);
+					[
+						'id' => $hashedSessionId,
+						'timestamp' => $time,
+						'data' => $data,
+					] + $this->additionalData,
+				]);
 			}
+			unset($this->rows[$id]);
 		} elseif ($row) {
 			if (!is_int($row->timestamp)) {
 				throw new SessionColumnUnexpectedTypeException('timestamp', gettype($row->timestamp), 'int');
@@ -217,9 +221,10 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			if ($this->unchangedUpdateDelay === 0 || $time - $row->timestamp > $this->unchangedUpdateDelay) {
 				// Optimization: When data has not been changed, only update
 				// the timestamp after a configured delay, if any.
-				$row->update([
+				$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
 					'timestamp' => $time,
 				]);
+				unset($this->rows[$id]);
 			}
 		}
 
