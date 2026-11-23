@@ -33,6 +33,20 @@ sessionHandler:
 		sessionHandler: Spaze\Session\DI\MysqlSessionHandlerExtension
 ```
 
+## Garbage collection
+
+Expired sessions are deleted only when the handler's `gc()` method runs. It deletes rows with a `timestamp` older than the lifetime it's called with. When PHP calls it, the lifetime is `session.gc_maxlifetime`.
+
+The timestamp is updated when the session data changes. When the data doesn't change, the timestamp is updated at most once per `unchangedUpdateDelay` seconds, 300 by default. Keep the lifetime well above that.
+
+On MySQL servers with `@@server_id` from 2 to 9, `gc()` keeps rows longer, to avoid conflicts in master-master replication. For each server ID above 1, it adds a day or a tenth of the lifetime, whichever is more.
+
+Until a row is deleted, the expired session is still accepted, even with `session.use_strict_mode` enabled. PHP's own `files` session handler works the same way.
+
+PHP calls `gc()` when a session is started, with a probability of `session.gc_probability`/`session.gc_divisor`. It also calls it every time `session_gc()` is called while a session is active. With a low probability and little traffic, expired sessions can stay usable for a long time.
+
+Some Linux distributions set `session.gc_probability` to 0 and delete expired sessions with their own cron job instead. Such a job deletes only the files of the `files` session handler, not the rows in your sessions table. In that case, call the handler's `gc()` with your session lifetime from your own cron job.
+
 ## Features
 
 - For security reasons, the session id is stored in the database as an SHA-256 hash.
