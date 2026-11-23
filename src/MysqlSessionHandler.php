@@ -103,6 +103,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			$this->unlock();
 			// 1 if the lock was acquired, 0 if it timed out, null on some errors, most errors throw an exception
 			$result = $this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $lockId, $this->lockTimeout)->fetchField();
+			// The result is a string with some connection options
+			$result = \is_numeric($result) ? (int)$result : null;
 			if ($result !== 1) {
 				throw new SessionLockException($this->lockTimeout, $result === 0);
 			}
