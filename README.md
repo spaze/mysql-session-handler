@@ -47,6 +47,12 @@ PHP calls `gc()` when a session is started, with a probability of `session.gc_pr
 
 Some Linux distributions set `session.gc_probability` to 0 and delete expired sessions with their own cron job instead. Such a job deletes only the files of the `files` session handler, not the rows in your sessions table. In that case, call the handler's `gc()` with your session lifetime from your own cron job.
 
+The `timestamp` column has an index, so that `gc()` doesn't have to read the whole table. With the default transaction isolation level, `gc()` keeps the rows it reads locked until it's done. Without the index, it reads and locks all rows, and other requests have to wait before they can save their sessions. If your table doesn't have the index, add it:
+
+```sql
+ALTER TABLE `sessions` ADD KEY `timestamp` (`timestamp`);
+```
+
 ## Features
 
 - For security reasons, the session id is stored in the database as an SHA-256 hash.
