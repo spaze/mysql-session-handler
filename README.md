@@ -91,7 +91,9 @@ Requests using the same session wait for each other, the session is locked with 
 sessionHandler:
     lockTimeout: 10
 ```
-A timeout of 0 doesn't wait at all, a negative timeout waits indefinitely, like PHP's own `files` session handler.
+A timeout of 0 doesn't wait at all. On MySQL, a negative timeout waits indefinitely, like PHP's own `files` session handler, but MariaDB doesn't support negative timeouts.
+
+If the session is started automatically, for example by your framework when a request has a session cookie, the request holds the lock even if it doesn't use the session. The exception can then come from the framework's startup code, before your application's own error page can handle it.
 
 ## Credits
 

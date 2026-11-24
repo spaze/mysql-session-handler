@@ -9,6 +9,7 @@ use SessionHandlerInterface;
 use Spaze\Encryption\SymmetricKeyEncryption;
 use Spaze\Session\Exceptions\SessionColumnUnexpectedTypeException;
 use Spaze\Session\Exceptions\SessionLockException;
+use Throwable;
 
 /**
  * Storing session to database.
@@ -26,6 +27,9 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	private int $unchangedUpdateDelay = 300;
 
 	private ?string $lockId = null;
+
+	/** Whether the session is being started: open() was called, read() not yet */
+	private bool $starting = false;
 
 	/** @var array<string, string> session id => session id hash */
 	private array $idHashes = [];
@@ -103,6 +107,8 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			$this->unlock();
 			// 1 if the lock was acquired, 0 if it timed out, null on some errors, most errors throw an exception
 			$result = $this->explorer->query('SELECT GET_LOCK(?, ?) as `lock`', $lockId, $this->lockTimeout)->fetchField();
+			// The result is a string with some connection options
+			$result = \is_numeric($result) ? (int)$result : null;
 			if ($result !== 1) {
 				throw new SessionLockException($this->lockTimeout, $result === 0);
 			}
@@ -117,8 +123,10 @@ class MysqlSessionHandler implements SessionHandlerInterface
 			return;
 		}
 
-		$this->explorer->query('SELECT RELEASE_LOCK(?)', $this->lockId);
+		$lockId = $this->lockId;
+		// Forget the lock first, the query fails mostly when the connection is gone, and the lock with it
 		$this->lockId = null;
+		$this->explorer->query('SELECT RELEASE_LOCK(?)', $lockId);
 	}
 
 
@@ -142,9 +150,25 @@ class MysqlSessionHandler implements SessionHandlerInterface
 	}
 
 
+	/**
+	 * When read(), write() or destroy() throws, or validateId() while the session is being started, PHP ends the session without calling close(),
+	 * because it doesn't call handler methods while an exception is pending. The lock would then be held until the database connection is closed,
+	 * or until this handler starts a session with another ID. A subclass that catches these exceptions and keeps the session keeps it without the lock.
+	 */
+	private function closeAfterException(): void
+	{
+		try {
+			$this->close();
+		} catch (Throwable) {
+			// The original exception is thrown by the caller, close() fails mostly when the connection is gone, and the lock with it
+		}
+	}
+
+
 	public function open(string $path, string $name): bool
 	{
 		$this->clearCache();
+		$this->starting = true;
 		$this->lock();
 		return true;
 	}
@@ -152,6 +176,7 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	public function close(): bool
 	{
+		$this->starting = false;
 		$this->unlock();
 		$this->clearCache();
 		return true;
@@ -160,75 +185,91 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	public function destroy(string $id): bool
 	{
-		$hashedSessionId = $this->hash($id);
-		$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
-		unset($this->rows[$id], $this->data[$id]);
-		$this->unlock();
-		return true;
+		try {
+			$hashedSessionId = $this->hash($id);
+			$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->delete();
+			unset($this->rows[$id], $this->data[$id]);
+			$this->unlock();
+			return true;
+		} catch (Throwable $e) {
+			$this->closeAfterException();
+			throw $e;
+		}
 	}
 
 
 	public function read(string $id): string
 	{
-		$this->lock();
-		$row = $this->getRow($id);
+		$this->starting = false;
+		try {
+			$this->lock();
+			$row = $this->getRow($id);
 
-		if ($row) {
-			if (!is_string($row->data)) {
-				throw new SessionColumnUnexpectedTypeException('data', gettype($row->data), 'string');
+			if ($row) {
+				if (!is_string($row->data)) {
+					throw new SessionColumnUnexpectedTypeException('data', gettype($row->data), 'string');
+				}
+				$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($row->data) : $row->data);
+				return $this->data[$id];
 			}
-			$this->data[$id] = ($this->encryptionService ? $this->encryptionService->decrypt($row->data) : $row->data);
-			return $this->data[$id];
+			return '';
+		} catch (Throwable $e) {
+			$this->closeAfterException();
+			throw $e;
 		}
-		return '';
 	}
 
 
 	public function write(string $id, string $data): bool
 	{
-		$this->lock();
-		$hashedSessionId = $this->hash($id);
-		$time = \time();
-		foreach ($this->onBeforeDataWrite as $handler) {
-			$handler();
-		}
-		$row = $this->getRow($id);
-		if (!isset($this->data[$id]) || $this->data[$id] !== $data || $this->additionalData !== []) {
-			if ($this->encryptionService) {
-				$data = $this->encryptionService->encrypt($data);
+		try {
+			$this->lock();
+			$hashedSessionId = $this->hash($id);
+			$time = \time();
+			foreach ($this->onBeforeDataWrite as $handler) {
+				$handler();
 			}
-			if ($row) {
-				// Not $row->update() because it re-reads the row afterwards and throws if it is gone by then
-				$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
-					'timestamp' => $time,
-					'data' => $data,
-				] + $this->additionalData);
-			} else {
-				// A list with one row, because inserting a single row re-reads it afterwards and throws if it is gone by then
-				$this->explorer->table($this->tableName)->insert([
-					[
-						'id' => $hashedSessionId,
+			$row = $this->getRow($id);
+			if (!isset($this->data[$id]) || $this->data[$id] !== $data || $this->additionalData !== []) {
+				if ($this->encryptionService) {
+					$data = $this->encryptionService->encrypt($data);
+				}
+				if ($row) {
+					// Not $row->update() because it re-reads the row afterwards and throws if it is gone by then
+					$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
 						'timestamp' => $time,
 						'data' => $data,
-					] + $this->additionalData,
-				]);
-			}
-			unset($this->rows[$id]);
-		} elseif ($row) {
-			if (!is_int($row->timestamp)) {
-				throw new SessionColumnUnexpectedTypeException('timestamp', gettype($row->timestamp), 'int');
-			}
-			if ($this->unchangedUpdateDelay === 0 || $time - $row->timestamp > $this->unchangedUpdateDelay) {
-				// Optimization: When data has not been changed, only update
-				// the timestamp after a configured delay, if any.
-				$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
-					'timestamp' => $time,
-				]);
+					] + $this->additionalData);
+				} else {
+					// A list with one row, because inserting a single row re-reads it afterwards and throws if it is gone by then
+					$this->explorer->table($this->tableName)->insert([
+						[
+							'id' => $hashedSessionId,
+							'timestamp' => $time,
+							'data' => $data,
+						] + $this->additionalData,
+					]);
+				}
 				unset($this->rows[$id]);
+			} elseif ($row) {
+				if (!is_int($row->timestamp)) {
+					throw new SessionColumnUnexpectedTypeException('timestamp', gettype($row->timestamp), 'int');
+				}
+				if ($this->unchangedUpdateDelay === 0 || $time - $row->timestamp > $this->unchangedUpdateDelay) {
+					// Optimization: When data has not been changed, only update
+					// the timestamp after a configured delay, if any.
+					$this->explorer->table($this->tableName)->where('id', $hashedSessionId)->update([
+						'timestamp' => $time,
+					]);
+					unset($this->rows[$id]);
+				}
 			}
-		}
 
-		return true;
+			return true;
+		} catch (Throwable $e) {
+			$this->closeAfterException();
+			throw $e;
+		}
 	}
 
 
@@ -267,7 +308,15 @@ class MysqlSessionHandler implements SessionHandlerInterface
 
 	public function validateId(string $id): bool
 	{
-		return $this->getRow($id) !== null;
+		try {
+			return $this->getRow($id) !== null;
+		} catch (Throwable $e) {
+			// Not when called by session_create_id() with an active session, which stays active when this throws, and so does the lock
+			if ($this->starting) {
+				$this->closeAfterException();
+			}
+			throw $e;
+		}
 	}
 
 }
