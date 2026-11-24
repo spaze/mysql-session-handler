@@ -60,7 +60,7 @@ Follow the guide at [spaze/encryption](https://github.com/spaze/encryption#usage
 
 Define a new service:
 ```
-sessionEncryption: \Spaze\Encryption\Symmetric\StaticKey('session', %encryption.keys%, %encryption.activeKeyIds%)
+sessionEncryption: \Spaze\Encryption\SymmetricKeyEncryption(%encryption.keys.session%, %encryption.activeKeyIds.session%, %encryption.prefixes.session%)
 ```
 
 Add the new encryption service to the session handler:
